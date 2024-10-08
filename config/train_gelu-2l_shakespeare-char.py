@@ -6,7 +6,7 @@ Intended mainly to sanity-check the implementation """
 out_dir = 'out-shakespeare-char'
 wandb_log = True # override via command line if you like
 wandb_project = 'interpretable-lms'
-wandb_run_name = 'gelu-2l_shakespeare-char'
+wandb_run_name = 'mod-gelu-2l_shakespeare-char'
 
 # Dataset details
 dataset = 'shakespeare_char'
