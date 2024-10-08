@@ -1,0 +1,27 @@
+[project]
+name = "nanoGPT"
+version = "0.1.0"
+description = "Default template for PDM package"
+authors = [
+    {name = "Daniel Tan", email = "dtch1997@users.noreply.github.com"},
+]
+dependencies = [
+    "torch>=2.4.1",
+    "numpy>=2.1.2",
+    "transformers>=4.45.2",
+    "datasets>=3.0.1",
+    "tiktoken>=0.8.0",
+    "wandb>=0.18.3",
+    "tqdm>=4.66.5",
+]
+requires-python = ">=3.11"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+
+[tool.pdm]
+distribution = true
