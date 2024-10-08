@@ -100,16 +100,19 @@ class Block(nn.Module):
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
 
+        self.attn_output_head = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        self.mlp_output_head = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+
     def forward(self, x, y):
         # x: the residual stream that can be read from 
         # y: the output-only residual stream where we'll apply losses
         attn_output = self.attn(self.ln_1(x))
         x = x + attn_output
-        y = y + attn_output
+        y = y + self.attn_output_head(attn_output)
 
         mlp_output = self.mlp(self.ln_2(x))
         x = x + mlp_output
-        y = y + mlp_output
+        y = y + self.mlp_output_head(mlp_output)
         return x, y
 
 @dataclass
