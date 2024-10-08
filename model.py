@@ -120,8 +120,13 @@ class GPTConfig:
     n_head: int = 12
     n_embd: int = 768
     dropout: float = 0.0
-    per_layer_loss_weight: list[int] | None = None # per-layer loss weight. If None, then [0, ..., 0, 1]
+    per_layer_weight: list[int] | None = None # per-layer weight for combining logits. If None, then [0, ..., 0, 1]
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+
+    def __post_init__(self):
+        if self.per_layer_weight is None:
+            self.per_layer_weight = [0.0] * (self.n_layer) + [1.0]
+        assert len(self.per_layer_weight) == self.n_layer + 1, f"Expected {self.n_layer+1} per-layer weights, got {len(self.per_layer_weight)}"
 
 class GPT(nn.Module):
 
@@ -175,6 +180,16 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
+    def get_logits(self, ys):
+        """ Get the logits from the model, combining per-layer logits with per-layer weights """ 
+        # forward the GPT model
+        per_layer_logits = [self.lm_head(y) for y in ys]
+        # weighted sum 
+        logit_sum = 0
+        for w, logits in zip(self.config.per_layer_weight, per_layer_logits):
+            logit_sum += w * logits
+        return logit_sum
+
     def forward(self, idx, targets=None):
         device = idx.device
         b, t = idx.size()
@@ -189,26 +204,22 @@ class GPT(nn.Module):
 
         ys = []
         for block in self.transformer.h:
-            x, y = block(x, y)
+            # Read from resid_pre of each block
             ys.append(y)
+            x, y = block(x, y)
         x = self.transformer.ln_f(x)
         y = self.transformer.ln_f(y)
+        # Also read from final output 
+        ys.append(y)
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
-            per_layer_logits = [self.lm_head(y) for y in ys]
-            per_layer_loss = [F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1) for logits in per_layer_logits]
-            if self.config.per_layer_loss_weight is None:
-                loss = per_layer_loss[-1]
-            else:
-                loss = sum(w * l for w, l in zip(self.config.per_layer_loss_weight, per_layer_loss))
+            logits = self.get_logits(ys)
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.reshape(-1), ignore_index=-1)            
 
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
-            if self.config.per_layer_loss_weight is not None:
-                raise NotImplementedError("Sampling not yet implemented")
-            else:
-                logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
+            logits = self.get_logits(ys)
             loss = None
 
         return logits, loss
