@@ -100,8 +100,9 @@ class Block(nn.Module):
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
 
-        self.attn_output_head = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
-        self.mlp_output_head = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        # Weights for writing to the output stream
+        self.attn_output_head = nn.Linear(config.n_embd, config.n_embd, bias=True)
+        self.mlp_output_head = nn.Linear(config.n_embd, config.n_embd, bias=True)
 
     def forward(self, x, y):
         # x: the residual stream that can be read from 
