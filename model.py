@@ -100,10 +100,21 @@ class Block(nn.Module):
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
 
-    def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
-        x = x + self.mlp(self.ln_2(x))
-        return x
+        # Weights for writing to the output stream
+        self.attn_output_head = nn.Linear(config.n_embd, config.n_embd, bias=True)
+        self.mlp_output_head = nn.Linear(config.n_embd, config.n_embd, bias=True)
+
+    def forward(self, x, y):
+        # x: the residual stream that can be read from 
+        # y: the output-only residual stream where we'll apply losses
+        attn_output = self.attn(self.ln_1(x))
+        x = x + attn_output
+        y = y + self.attn_output_head(attn_output)
+
+        mlp_output = self.mlp(self.ln_2(x))
+        x = x + mlp_output
+        y = y + self.mlp_output_head(mlp_output)
+        return x, y
 
 @dataclass
 class GPTConfig:
@@ -113,11 +124,17 @@ class GPTConfig:
     n_head: int = 12
     n_embd: int = 768
     dropout: float = 0.0
+    per_layer_weight: list[int] | None = None # per-layer weight for combining logits. If None, then [0, ..., 0, 1]
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+
+    def __post_init__(self):
+        if self.per_layer_weight is None:
+            self.per_layer_weight = [0.0] * (self.n_layer) + [1.0]
+        assert len(self.per_layer_weight) == self.n_layer + 1, f"Expected {self.n_layer+1} per-layer weights, got {len(self.per_layer_weight)}"
 
 class GPT(nn.Module):
 
-    def __init__(self, config):
+    def __init__(self, config: GPTConfig):
         super().__init__()
         assert config.vocab_size is not None
         assert config.block_size is not None
@@ -167,6 +184,16 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
+    def get_logits(self, ys):
+        """ Get the logits from the model, combining per-layer logits with per-layer weights """ 
+        # forward the GPT model
+        per_layer_logits = [self.lm_head(y) for y in ys]
+        # weighted sum 
+        logit_sum = 0
+        for w, logits in zip(self.config.per_layer_weight, per_layer_logits):
+            logit_sum += w * logits
+        return logit_sum
+
     def forward(self, idx, targets=None):
         device = idx.device
         b, t = idx.size()
@@ -177,17 +204,26 @@ class GPT(nn.Module):
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
         x = self.transformer.drop(tok_emb + pos_emb)
+        y = self.transformer.drop(tok_emb + pos_emb)
+
+        ys = []
         for block in self.transformer.h:
-            x = block(x)
+            # Read from resid_pre of each block
+            ys.append(y)
+            x, y = block(x, y)
         x = self.transformer.ln_f(x)
+        y = self.transformer.ln_f(y)
+        # Also read from final output 
+        ys.append(y)
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+            logits = self.get_logits(ys)
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.reshape(-1), ignore_index=-1)            
+
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
-            logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
+            logits = self.get_logits(ys)
             loss = None
 
         return logits, loss
