@@ -9,7 +9,12 @@ https://github.com/huggingface/transformers/blob/main/src/transformers/models/gp
 
 import math
 import inspect
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
 from dataclasses import dataclass
+from nanogpt.nn import LayerNorm, CausalSelfAttention, MLP
 
 @dataclass
 class GPTConfig:
@@ -35,7 +40,7 @@ class GPTBlock(nn.Module):
         x = x + self.attn(self.ln_1(x))
         x = x + self.mlp(self.ln_2(x))
         return x
-
+    
 class GPT(nn.Module):
 
     def __init__(self, config: GPTConfig):
