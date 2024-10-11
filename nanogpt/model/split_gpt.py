@@ -103,11 +103,16 @@ class SplitGPT(nn.Module):
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.d_resid),
             wpe = nn.Embedding(config.block_size, config.d_resid),
-            c_embd_out = nn.Linear(config.d_resid, config.d_resid_read),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([SplitGPTBlock(config) for _ in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
+            # Additional modules to handle the read and write streams
+            c_embd_out = nn.Linear(config.d_resid, config.d_resid_read),
+            c_ln_f_pre = nn.Linear(config.d_resid_write, config.n_embd),
         ))
+        # We need an initial value for the write stream, and it makes sense to use zeros
+        self.register_buffer("init_write_stream", torch.zeros(1, config.d_resid_write))
+
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
