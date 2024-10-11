@@ -21,6 +21,10 @@ requires-python = ">=3.10"
 readme = "README.md"
 license = { text = "MIT" }
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.3",
+]
 [build-system]
 requires = ["pdm-backend"]
 build-backend = "pdm.backend"
