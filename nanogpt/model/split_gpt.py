@@ -19,7 +19,8 @@ def split_resid_into_read_and_write(
     """ Split the residual stream into the read and write streams """
     d_resid = x.shape[-1]
     assert d_resid_read + d_resid_write == d_resid, f"Expected d_resid_read + d_resid_write = d_resid; got {d_resid_read} + {d_resid_write} != {d_resid}"
-    return x.tensor_split([d_resid_read, d_resid_write], dim=-1)
+    x_read, x_write = x.tensor_split([d_resid_read], dim=-1)
+    return x_read, x_write
 
 def merge_resid_read_and_write(
     x_read: Float[torch.Tensor, "... d_resid_read"],
@@ -67,7 +68,7 @@ class SplitGPTBlock(nn.Module):
         # Make sure attention reads only from the first d_resid dimensions
         self.c_ln1_pre = nn.Linear(config.d_resid_read, config.n_embd)
         self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
-        self.attn = CausalSelfAttention(config.n_head, config.d_resid_read, config.dropout, config.block_size, bias=config.bias)
+        self.attn = CausalSelfAttention(config.n_head, config.n_embd, config.dropout, config.block_size, bias=config.bias)
         self.c_attn_post = nn.Linear(config.n_embd, config.d_resid_read)
 
         # Make sure MLP reads only from the first d_resid dimensions
@@ -121,7 +122,7 @@ class SplitGPT(nn.Module, Model):
         # We need an initial value for the write stream, and it makes sense to use zeros
         self.register_buffer("init_resid_write", torch.zeros(config.block_size, config.d_resid_write))
 
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.lm_head = nn.Linear(config.d_resid_write, config.vocab_size, bias=False)
 
         # init all weights
         self.apply(self._init_weights)
