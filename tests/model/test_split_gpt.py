@@ -13,7 +13,7 @@ def block_and_config():
         n_head=2,
         d_resid_read=32,
         d_resid_write=32,
-        dropout=0.1,
+        dropout=0.0 # No dropout for testing
     )
     block = SplitGPTBlock(config)
     return block, config
@@ -33,14 +33,17 @@ def test_splitgpt_block_ignores_input_write_stream(block_and_config):
     out1 = block(x1)
     out2 = block(x2)
 
+    actual_read_diff = out1[:, :, :config.d_resid_read] - out2[:, :, :config.d_resid_read]
+    expected_read_diff = torch.zeros_like(actual_read_diff)
+
     # Check that the read stream is the same
-    assert torch.allclose(out1[:, :, :config.d_resid_read], out2[:, :, :config.d_resid_read], atol=1e-6), \
+    assert torch.allclose(actual_read_diff, expected_read_diff, atol=1e-6), \
         "SplitGPTBlock should ignore the write stream"
     
     # Check that the write stream differs by the expected amount
-    expected_diff = x2[:, :, config.d_resid_read:] - x1[:, :, config.d_resid_read:]
-    actual_diff = out2[:, :, config.d_resid_read:] - out1[:, :, config.d_resid_read:]
-    assert torch.allclose(expected_diff, actual_diff, atol=1e-6), \
+    expected_write_diff = x2[:, :, config.d_resid_read:] - x1[:, :, config.d_resid_read:]
+    actual_write_diff = out2[:, :, config.d_resid_read:] - out1[:, :, config.d_resid_read:]
+    assert torch.allclose(actual_write_diff, expected_write_diff, atol=1e-6), \
         "SplitGPTBlock should modify the write stream by the expected amount"
 
 

@@ -75,6 +75,7 @@ class SplitGPTBlock(nn.Module):
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config.n_embd, config.dropout)
 
+
     def forward(self, x: Float[torch.Tensor, "batch seq n_embd"]) -> Float[torch.Tensor, "batch seq n_embd"]:
 
         x_read, x_write = split_resid_into_read_and_write(x, self.config.d_resid_read, self.config.d_resid_write)
@@ -85,7 +86,6 @@ class SplitGPTBlock(nn.Module):
         attn_out = self.attn(attn_in)
         attn_out_read, attn_out_write = split_resid_into_read_and_write(attn_out, self.config.d_resid_read, self.config.d_resid_write)
         x_read = x_read + attn_out_read
-        x_write = x_write + attn_out_write
 
         # MLP
         ln2_in = self.c_ln2_pre(x_read)
@@ -93,8 +93,9 @@ class SplitGPTBlock(nn.Module):
         mlp_out = self.mlp(mlp_in)
         mlp_out_read, mlp_out_write = split_resid_into_read_and_write(mlp_out, self.config.d_resid_read, self.config.d_resid_write)
         x_read = x_read + mlp_out_read
-        x_write = x_write + mlp_out_write
 
+        # Merge the read and write streams
+        x_write = x_write + attn_out_write + mlp_out_write
         x = merge_resid_read_and_write(x_read, x_write)
         return x
 
