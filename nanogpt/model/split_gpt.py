@@ -37,8 +37,12 @@ class SplitGPTConfig:
     d_resid_read: int = 768
     d_resid_write: int = 0
     dropout: float = 0.0
-    per_layer_logit_coefficient: list[float] = [1.0] * 13 # (n_layer + 1) coefficients for each layer's logits
+    per_layer_logit_coefficient: list[float] | None = None
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+
+    def __post_init__(self):
+        if self.per_layer_logit_coefficient is None:
+            self.per_layer_logit_coefficient = [0.0] * (self.n_layer) + [1.0]
 
     def get_normalized_coefficients_th(self) -> Float[torch.Tensor, "n_layer + 1"]:
         coeffs = torch.tensor(self.per_layer_logit_coefficient)

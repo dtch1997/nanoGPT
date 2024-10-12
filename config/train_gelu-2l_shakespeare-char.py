@@ -3,7 +3,7 @@
 Intended mainly to sanity-check the implementation """
 
 # Metadata
-out_dir = 'out-shakespeare-char'
+out_dir = 'out-gelu-2l-shakespeare-char'
 wandb_log = True # override via command line if you like
 wandb_project = 'interpretable-lms'
 wandb_run_name = 'gelu-2l_shakespeare-char'

@@ -3,10 +3,10 @@
 Intended mainly to sanity-check the implementation """
 
 # Metadata
-out_dir = 'out-shakespeare-char'
+out_dir = 'out-gelu-2l-split-shakespeare-char'
 wandb_log = True # override via command line if you like
 wandb_project = 'interpretable-lms'
-wandb_run_name = 'gelu-2l-mod_shakespeare-char'
+wandb_run_name = 'gelu-2l-split_shakespeare-char'
 
 # Dataset details
 dataset = 'shakespeare_char'
@@ -15,11 +15,12 @@ batch_size = 64
 block_size = 256 # context of up to 256 previous characters
 
 # Model architecture
-n_layer = 4
+n_layer = 2
 n_head = 8
-n_embd = 512
+d_resid_read = 512
+d_resid_write = 512
 dropout = 0.2
-per_layer_weight = [0, 0, 1, 0, 0]
+per_layer_logit_coefficient = [0, 0, 1]
 
 # Training details
 max_iters = 5000
