@@ -129,8 +129,7 @@ class SplitGPT(nn.Module, Model):
         self.lm_head = nn.Linear(config.d_resid_write, config.vocab_size, bias=False)
         # GPT has weight tying baked in, so we should do that too 
         if not config.d_resid_write == config.d_resid_read:
-            raise ValueError(f"d_resid_read {config.d_resid_read} != {config.d_resid_write}. Cannot tie weights.")
-    
+            raise ValueError(f"d_resid_read {config.d_resid_read} != {config.d_resid_write}. Cannot tie weights.") 
         self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
         # init all weights

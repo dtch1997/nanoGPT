@@ -5,7 +5,7 @@ Intended mainly to sanity-check the implementation """
 # Metadata
 out_dir = 'out-gelu-2l-split-shakespeare-char'
 wandb_log = True # override via command line if you like
-wandb_project = 'interpretable-lms'
+wandb_project = 'interpretable-lms-2'
 wandb_run_name = 'gelu-2l-split_shakespeare-char'
 
 # Dataset details
@@ -17,8 +17,9 @@ block_size = 256 # context of up to 256 previous characters
 # Model architecture
 n_layer = 2
 n_head = 8
-d_resid_read = 256
-d_resid_write = 256
+d_resid_read = 512
+d_resid_write = 512
+n_embd = 512
 dropout = 0.2
 per_layer_logit_coefficient = [0, 0, 1]
 

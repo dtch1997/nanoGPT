@@ -93,7 +93,7 @@ class GPT(nn.Module, Model):
             if hasattr(block.attn, 'bias'):
                 block.attn.bias = block.attn.bias[:,:,:block_size,:block_size]
 
-    def get_num_params(self, non_embedding=True):
+    def get_num_params(self, non_embedding=False):
         """
         Return the number of parameters in the model.
         For non-embedding count (default), the position embeddings get subtracted.
