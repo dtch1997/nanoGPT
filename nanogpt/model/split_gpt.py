@@ -36,7 +36,8 @@ class SplitGPTConfig:
     n_layer: int = 12
     n_head: int = 12
     d_resid_read: int = 768
-    d_resid_write: int = 0
+    d_resid_write: int = 768
+    n_embd: int = 768
     dropout: float = 0.0
     per_layer_logit_coefficient: list[float] | None = None
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
@@ -53,11 +54,6 @@ class SplitGPTConfig:
     def d_resid(self):
         return self.d_resid_read + self.d_resid_write
 
-    # Define alias for legacy reasons
-    @property 
-    def n_embd(self):
-        return self.d_resid
-
 class SplitGPTBlock(nn.Module):
     """ Basic transformer block """
 
@@ -69,11 +65,13 @@ class SplitGPTBlock(nn.Module):
         self.c_ln1_pre = nn.Linear(config.d_resid_read, config.n_embd)
         self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
         self.attn = CausalSelfAttention(config.n_head, config.n_embd, config.dropout, config.block_size, bias=config.bias)
+        self.c_attn_post = nn.Linear(config.n_embd, config.d_resid)
 
         # Make sure MLP reads only from the first d_resid dimensions
         self.c_ln2_pre = nn.Linear(config.d_resid_read, config.n_embd)
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config.n_embd, config.dropout)
+        self.c_mlp_post = nn.Linear(config.n_embd, config.d_resid)
 
 
     def forward(self, x: Float[torch.Tensor, "batch seq n_embd"]) -> Float[torch.Tensor, "batch seq n_embd"]:
@@ -84,6 +82,7 @@ class SplitGPTBlock(nn.Module):
         ln1_in = self.c_ln1_pre(x_read)
         attn_in = self.ln_1(ln1_in)
         attn_out = self.attn(attn_in)
+        attn_out = self.c_attn_post(attn_out)
         attn_out_read, attn_out_write = split_resid_into_read_and_write(attn_out, self.config.d_resid_read, self.config.d_resid_write)
         x_read = x_read + attn_out_read
 
@@ -91,6 +90,7 @@ class SplitGPTBlock(nn.Module):
         ln2_in = self.c_ln2_pre(x_read)
         mlp_in = self.ln_2(ln2_in)
         mlp_out = self.mlp(mlp_in)
+        mlp_out = self.c_mlp_post(mlp_out)
         mlp_out_read, mlp_out_write = split_resid_into_read_and_write(mlp_out, self.config.d_resid_read, self.config.d_resid_write)
         x_read = x_read + mlp_out_read
 
@@ -192,7 +192,7 @@ class SplitGPT(nn.Module, Model):
     def from_pretrained(cls, model_type, override_args=None):
         raise NotImplementedError("from_pretrained not implemented for SplitGPT")
     
-    def get_layerwise_resid(self, idx: Int[torch.Tensor, "batch seq"]) -> Float[torch.Tensor, "batch layer seq n_embd"]:
+    def get_layerwise_resid(self, idx: Int[torch.Tensor, "batch seq"]) -> Float[torch.Tensor, "batch layer seq d_resid"]:
         """ Get the residual tensor at each layer """
         device = idx.device
         b, t = idx.size()
@@ -208,14 +208,14 @@ class SplitGPT(nn.Module, Model):
 
         layerwise_x = [x]
         for block in self.transformer.h:
-            x = block(x) # each block has shape (b, t, n_embd)
+            x = block(x) # each block has shape (b, t, d_resid)
             layerwise_x.append(x)
         
-        return torch.stack(layerwise_x, dim=1) # (b, n_layer + 1, t, n_embd)
+        return torch.stack(layerwise_x, dim=1) # (b, n_layer + 1, t, d_resid)
 
     def get_logits(
         self, 
-        layerwise_x: Float[torch.Tensor, "batch layer seq n_embd"],
+        layerwise_x: Float[torch.Tensor, "batch layer seq d_resid"],
         coeffs: Float[torch.Tensor, "n_layer + 1"] | None = None
     ) -> Float[torch.Tensor, "batch seq vocab_size"]:
         """ Get the logits from the model 

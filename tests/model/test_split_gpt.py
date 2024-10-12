@@ -13,6 +13,7 @@ def block_and_config():
         n_head=2,
         d_resid_read=32,
         d_resid_write=32,
+        n_embd = 32,
         dropout=0.0 # No dropout for testing
     )
     block = SplitGPTBlock(config)
