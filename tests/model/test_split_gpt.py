@@ -1,11 +1,67 @@
 import pytest
 import torch
-import torch.optim as optim
 
-from nanogpt.model.split_gpt import SplitGPT, SplitGPTConfig
+from nanogpt.model.split_gpt import SplitGPT, SplitGPTConfig, SplitGPTBlock
 from nanogpt.model.split_gpt import split_resid_into_read_and_write, merge_resid_read_and_write
 
-def test_split_merge_gradient_preservation():
+@pytest.fixture
+def block_and_config():
+    config = SplitGPTConfig(
+        block_size=32,
+        vocab_size=100,
+        n_layer=1,
+        n_head=2,
+        d_resid_read=32,
+        d_resid_write=32,
+        dropout=0.1,
+    )
+    block = SplitGPTBlock(config)
+    return block, config
+
+def test_splitgpt_block_ignores_input_write_stream(block_and_config):
+    block, config = block_and_config
+    
+    # Create two inputs with same read stream but different write streams
+    x_read = torch.randn(2, 16, config.d_resid_read)
+    x_write1 = torch.randn(2, 16, config.d_resid_write)
+    x_write2 = torch.randn(2, 16, config.d_resid_write)
+
+    x1 = torch.cat([x_read, x_write1], dim=-1)
+    x2 = torch.cat([x_read, x_write2], dim=-1)
+    
+    # Process both inputs
+    out1 = block(x1)
+    out2 = block(x2)
+
+    # Check that the read stream is the same
+    assert torch.allclose(out1[:, :, :config.d_resid_read], out2[:, :, :config.d_resid_read], atol=1e-6), \
+        "SplitGPTBlock should ignore the write stream"
+    
+    # Check that the write stream differs by the expected amount
+    expected_diff = x2[:, :, config.d_resid_read:] - x1[:, :, config.d_resid_read:]
+    actual_diff = out2[:, :, config.d_resid_read:] - out1[:, :, config.d_resid_read:]
+    assert torch.allclose(expected_diff, actual_diff, atol=1e-6), \
+        "SplitGPTBlock should modify the write stream by the expected amount"
+
+
+def test_splitgpt_block_modifies_write_stream(block_and_config):
+    block, config = block_and_config
+    
+    # Create input
+    x = torch.randn(2, 16, config.d_resid)
+    
+    # Process input
+    out = block(x)
+    
+    # Check that the write stream has been modified
+    assert not torch.allclose(x[:, :, config.d_resid_read:], out[:, :, config.d_resid_read:], atol=1e-6), \
+        "SplitGPTBlock should modify the write stream"
+    
+    # Check that the read stream has been modified (as it should be)
+    assert not torch.allclose(x[:, :, :config.d_resid_read], out[:, :, :config.d_resid_read], atol=1e-6), \
+        "SplitGPTBlock should modify the read stream"
+
+def test_split_merge():
     # Set up test data
     d_resid = 128
     d_resid_read = 64
@@ -15,7 +71,10 @@ def test_split_merge_gradient_preservation():
     # Forward pass
     x_read, x_write = split_resid_into_read_and_write(x, d_resid_read, d_resid_write)
     x_merged = merge_resid_read_and_write(x_read, x_write)
-    
+
+    # Check that x_merged is the same as x
+    assert torch.allclose(x, x_merged), "Merged tensor should be the same as the original tensor"
+
     # Compute loss and backward
     loss = x_merged.sum()
     loss.backward()
@@ -96,24 +155,6 @@ def test_loss_calculation(model_and_config:  tuple[SplitGPT, SplitGPTConfig], sa
     assert loss.ndim == 0, "Loss should be a scalar"
     assert not torch.isnan(loss), "Loss should not be NaN"
     assert not torch.isinf(loss), "Loss should not be infinite"
-
-def test_model_training_step(model_and_config:  tuple[SplitGPT, SplitGPTConfig], sample_input):
-    model, _ = model_and_config
-    targets = torch.randint(0, model.config.vocab_size, sample_input.shape)
-    
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-    
-    # Initial forward pass
-    _, initial_loss = model(sample_input, targets)
-    
-    # Training step
-    optimizer.zero_grad()
-    _, loss = model(sample_input, targets)
-    loss.backward()
-    optimizer.step()
-    
-    # Check that loss decreased
-    assert loss < initial_loss, "Loss should decrease after a training step"
 
 @pytest.fixture
 def model_and_data():

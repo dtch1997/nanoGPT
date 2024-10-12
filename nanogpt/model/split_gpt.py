@@ -77,22 +77,25 @@ class SplitGPTBlock(nn.Module):
 
     def forward(self, x: Float[torch.Tensor, "batch seq n_embd"]) -> Float[torch.Tensor, "batch seq n_embd"]:
 
-        # Attention
         x_read, x_write = split_resid_into_read_and_write(x, self.config.d_resid_read, self.config.d_resid_write)
+
+        # Attention
         ln1_in = self.c_ln1_pre(x_read)
         attn_in = self.ln_1(ln1_in)
         attn_out = self.attn(attn_in)
-        x = merge_resid_read_and_write(x_read, x_write)
-        x = x + attn_out
+        attn_out_read, attn_out_write = split_resid_into_read_and_write(attn_out, self.config.d_resid_read, self.config.d_resid_write)
+        x_read = x_read + attn_out_read
+        x_write = x_write + attn_out_write
 
         # MLP
-        x_read, x_write = split_resid_into_read_and_write(x, self.config.d_resid_read, self.config.d_resid_write)
         ln2_in = self.c_ln2_pre(x_read)
         mlp_in = self.ln_2(ln2_in)
         mlp_out = self.mlp(mlp_in)
-        x = merge_resid_read_and_write(x_read, x_write)
-        x = x + mlp_out
+        mlp_out_read, mlp_out_write = split_resid_into_read_and_write(mlp_out, self.config.d_resid_read, self.config.d_resid_write)
+        x_read = x_read + mlp_out_read
+        x_write = x_write + mlp_out_write
 
+        x = merge_resid_read_and_write(x_read, x_write)
         return x
 
 # NOTE: Currently, there is a lot of code duplication between this and GPT
