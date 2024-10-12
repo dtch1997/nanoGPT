@@ -1,11 +1,12 @@
 import math
 import inspect
+import einops
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
 
 from dataclasses import dataclass
-from jaxtyping import Float
+from jaxtyping import Float, Int
 
 from nanogpt.nn import LayerNorm, CausalSelfAttention, MLP
 
@@ -35,7 +36,12 @@ class SplitGPTConfig:
     d_resid_read: int = 768
     d_resid_write: int = 0
     dropout: float = 0.0
+    per_layer_logit_coefficient: list[float] = [1.0] * 13 # (n_layer + 1) coefficients for each layer's logits
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+
+    def get_normalized_coefficients_th(self) -> Float[torch.Tensor, "n_layer + 1"]:
+        coeffs = torch.tensor(self.per_layer_logit_coefficient)
+        return coeffs / coeffs.sum()
 
     @property 
     def d_resid(self):
@@ -101,24 +107,16 @@ class SplitGPT(nn.Module):
         self.config = config
 
         self.transformer = nn.ModuleDict(dict(
-            wte = nn.Embedding(config.vocab_size, config.d_resid),
-            wpe = nn.Embedding(config.block_size, config.d_resid),
+            wte = nn.Embedding(config.vocab_size, config.d_resid_read),
+            wpe = nn.Embedding(config.block_size, config.d_resid_read),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([SplitGPTBlock(config) for _ in range(config.n_layer)]),
-            ln_f = LayerNorm(config.n_embd, bias=config.bias),
-            # Additional modules to handle the read and write streams
-            c_embd_out = nn.Linear(config.d_resid, config.d_resid_read),
-            c_ln_f_pre = nn.Linear(config.d_resid_write, config.n_embd),
+            ln_f = LayerNorm(config.d_resid_write, bias=config.bias),
         ))
         # We need an initial value for the write stream, and it makes sense to use zeros
-        self.register_buffer("init_write_stream", torch.zeros(1, config.d_resid_write))
+        self.register_buffer("init_resid_write", torch.zeros(config.block_size, config.d_resid_write))
 
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        # with weight tying when using torch.compile() some warnings get generated:
-        # "UserWarning: functional_call was passed multiple values for tied weights.
-        # This behavior is deprecated and will be an error in future versions"
-        # not 100% sure what this is, so far seems to be harmless. TODO investigate
-        self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
         # init all weights
         self.apply(self._init_weights)
@@ -150,28 +148,60 @@ class SplitGPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, idx, targets=None):
+    def get_layerwise_resid(self, idx: Int[torch.Tensor, "batch seq"]) -> Float[torch.Tensor, "batch layer seq n_embd"]:
+        """ Get the residual tensor at each layer """
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
         pos = torch.arange(0, t, dtype=torch.long, device=device) # shape (t)
 
         # forward the GPT model itself
-        tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, d_resid)
-        pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, d_resid)
-        x = self.transformer.drop(tok_emb + pos_emb) # (b, t, d_resid)
+        tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, d_resid_read)
+        pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, d_resid_read)
+        x_read = self.transformer.drop(tok_emb + pos_emb) # (b, t, d_resid_read)
+        x_write = einops.repeat(self.init_resid_write, 't d -> b t d', b=b) # (b, t, d_resid_write)
+        x = merge_resid_read_and_write(x_read, x_write) # (b, t, d_resid)
 
+        layerwise_x = [x]
         for block in self.transformer.h:
             x = block(x) # each block has shape (b, t, n_embd)
-        x = self.transformer.ln_f(x)
+            layerwise_x.append(x)
+        
+        return torch.stack(layerwise_x, dim=1) # (b, n_layer + 1, t, n_embd)
+
+    def get_logits(
+        self, 
+        layerwise_x: Float[torch.Tensor, "batch layer seq n_embd"],
+        coeffs: Float[torch.Tensor, "n_layer + 1"] | None = None
+    ) -> Float[torch.Tensor, "batch seq vocab_size"]:
+        """ Get the logits from the model 
+        
+        Aggregate logits are a weighted linear combination of the layer logits
+        Coefficients are expected to sum to 1
+        If None, the default coefficients from the config are used
+        """
+        if coeffs is None:
+            coeffs = self.config.get_normalized_coefficients_th().to(layerwise_x.device)
+        # Check coefficients
+        assert coeffs.size(0) == layerwise_x.size(1), f"Expected {layerwise_x.size(1)} coefficients; got {coeffs.size(0)}"
+        assert torch.allclose(coeffs.sum(), torch.tensor(1.0, device=layerwise_x.device)), f"Expected coefficients to sum to 1; got {coeffs.sum()}"
+        
+        _, layerwise_x_write = split_resid_into_read_and_write(layerwise_x, self.config.d_resid_read, self.config.d_resid_write)
+        layerwise_x_normed = self.transformer.ln_f(layerwise_x_write) # (b, n_layer + 1, t, d_resid_write)        
+        agg_x = torch.einsum('b l t d, l -> b t d', layerwise_x_normed, coeffs) # (b, t, d_resid_write)
+        logits = self.lm_head(agg_x) # (b, t, vocab_size)
+        return logits
+
+    def forward(self, 
+        idx: Int[torch.Tensor, "batch seq"], 
+        targets: Int[torch.Tensor, "batch seq"] = None
+    ) -> tuple[Float[torch.Tensor, "batch seq vocab_size"], Float[torch.Tensor, "batch"] | None]:        
+        layerwise_x = self.get_layerwise_resid(idx)
+        logits = self.get_logits(layerwise_x)
 
         if targets is not None:
-            # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x)
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
         else:
-            # inference-time mini-optimization: only forward the lm_head on the very last position
-            logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
             loss = None
 
         return logits, loss
