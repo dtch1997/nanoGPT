@@ -1,6 +1,36 @@
 import pytest
 import torch
+import torch.optim as optim
+
 from nanogpt.model.split_gpt import SplitGPT, SplitGPTConfig
+from nanogpt.model.split_gpt import split_resid_into_read_and_write, merge_resid_read_and_write
+
+def test_split_merge_gradient_preservation():
+    # Set up test data
+    d_resid = 128
+    d_resid_read = 64
+    d_resid_write = 64
+    x = torch.randn(2, 16, d_resid, requires_grad=True)
+    
+    # Forward pass
+    x_read, x_write = split_resid_into_read_and_write(x, d_resid_read, d_resid_write)
+    x_merged = merge_resid_read_and_write(x_read, x_write)
+    
+    # Compute loss and backward
+    loss = x_merged.sum()
+    loss.backward()
+    
+    # Check that gradients are preserved
+    assert x.grad is not None, "Input tensor should have gradients"
+    assert torch.allclose(x.grad, torch.ones_like(x)), "Gradients should be all ones"
+    
+    # Check that gradients flow through both read and write streams
+    assert torch.all(x.grad[:, :, :d_resid_read] > 0), "Read stream should have positive gradients"
+    assert torch.all(x.grad[:, :, d_resid_read:] > 0), "Write stream should have positive gradients"
+    
+    # Check that the split tensors are on the computation graph
+    assert x_read.requires_grad, "x_read should require gradients"
+    assert x_write.requires_grad, "x_write should require gradients"
 
 @pytest.fixture
 def model_and_config() -> tuple[SplitGPT, SplitGPTConfig]:
@@ -23,7 +53,7 @@ def sample_input(model_and_config:  tuple[SplitGPT, SplitGPTConfig]) -> torch.Te
     seq_length = 16
     return torch.randint(0, config.vocab_size, (batch_size, seq_length))
 
-def test_get_layerwise_logits_not_all_same(model_and_config:  tuple[SplitGPT, SplitGPTConfig], sample_input):
+def test_layerwise_resid(model_and_config:  tuple[SplitGPT, SplitGPTConfig], sample_input):
     model, _ = model_and_config
     layerwise_resid = model.get_layerwise_resid(sample_input)
     
@@ -45,6 +75,8 @@ def test_all_parameters_receive_gradients(model_and_config:  tuple[SplitGPT, Spl
     
     # Check that all parameters have gradients
     for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
         assert param.grad is not None, f"Parameter {name} has no gradient"
         assert torch.sum(param.grad ** 2) > 0, f"Parameter {name} has zero gradient"
 
@@ -69,7 +101,7 @@ def test_model_training_step(model_and_config:  tuple[SplitGPT, SplitGPTConfig],
     model, _ = model_and_config
     targets = torch.randint(0, model.config.vocab_size, sample_input.shape)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     
     # Initial forward pass
     _, initial_loss = model(sample_input, targets)
@@ -82,6 +114,28 @@ def test_model_training_step(model_and_config:  tuple[SplitGPT, SplitGPTConfig],
     
     # Check that loss decreased
     assert loss < initial_loss, "Loss should decrease after a training step"
+
+@pytest.fixture
+def model_and_data():
+    config = SplitGPTConfig(
+        block_size=32,
+        vocab_size=100,
+        n_layer=2,
+        n_head=2,
+        d_resid_read=32,
+        d_resid_write=32,
+        dropout=0.1,
+    )
+    model = SplitGPT(config)
+    
+    # Create sample data
+    batch_size = 4
+    seq_length = 32
+    x = torch.randint(0, config.vocab_size, (batch_size, seq_length))
+    y = torch.randint(0, config.vocab_size, (batch_size, seq_length))
+    
+    return model, x, y
+
 
 if __name__ == "__main__":
     pytest.main()

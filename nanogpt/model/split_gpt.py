@@ -69,31 +69,31 @@ class SplitGPTBlock(nn.Module):
         self.c_ln1_pre = nn.Linear(config.d_resid_read, config.n_embd)
         self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
         self.attn = CausalSelfAttention(config.n_head, config.n_embd, config.dropout, config.block_size, bias=config.bias)
-        self.c_attn_post = nn.Linear(config.n_embd, config.d_resid_read)
 
         # Make sure MLP reads only from the first d_resid dimensions
         self.c_ln2_pre = nn.Linear(config.d_resid_read, config.n_embd)
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config.n_embd, config.dropout)
-        self.c_mlp_post = nn.Linear(config.n_embd, config.d_resid_read)
 
     def forward(self, x: Float[torch.Tensor, "batch seq n_embd"]) -> Float[torch.Tensor, "batch seq n_embd"]:
 
-        x_read, x_write = split_resid_into_read_and_write(x, self.config.d_resid_read, self.config.d_resid_write)
-
         # Attention
+        x_read, x_write = split_resid_into_read_and_write(x, self.config.d_resid_read, self.config.d_resid_write)
         ln1_in = self.c_ln1_pre(x_read)
         attn_in = self.ln_1(ln1_in)
         attn_out = self.attn(attn_in)
-        x_read = x_read + self.c_attn_post(attn_out)
+        x = merge_resid_read_and_write(x_read, x_write)
+        x = x + attn_out
 
         # MLP
+        x_read, x_write = split_resid_into_read_and_write(x, self.config.d_resid_read, self.config.d_resid_write)
         ln2_in = self.c_ln2_pre(x_read)
         mlp_in = self.ln_2(ln2_in)
         mlp_out = self.mlp(mlp_in)
-        x_read = x_read + self.c_mlp_post(mlp_out)
+        x = merge_resid_read_and_write(x_read, x_write)
+        x = x + mlp_out
 
-        return merge_resid_read_and_write(x_read, x_write)
+        return x
 
 # NOTE: Currently, there is a lot of code duplication between this and GPT
 # TODO: Refactor the code to reduce duplication
@@ -223,6 +223,6 @@ class SplitGPT(nn.Module, Model):
         
         _, layerwise_x_write = split_resid_into_read_and_write(layerwise_x, self.config.d_resid_read, self.config.d_resid_write)
         layerwise_x_normed = self.transformer.ln_f(layerwise_x_write) # (b, n_layer + 1, t, d_resid_write)        
-        agg_x = torch.einsum('b l t d, l -> b t d', layerwise_x_normed, coeffs) # (b, t, d_resid_write)
+        agg_x = einops.einsum(layerwise_x_normed, coeffs, 'b l t d, l -> b t d')    
         logits = self.lm_head(agg_x) # (b, t, vocab_size)
         return logits
