@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from transformer_lens.hook_points import HookedRootModule, HookPoint
 
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
@@ -91,7 +92,7 @@ class MLP(nn.Module):
         x = self.dropout(x)
         return x
 
-class Block(nn.Module):
+class Block(HookedRootModule):
 
     def __init__(self, config):
         super().__init__()
@@ -104,9 +105,21 @@ class Block(nn.Module):
         self.attn_output_head = nn.Linear(config.n_embd, config.n_embd, bias=True)
         self.mlp_output_head = nn.Linear(config.n_embd, config.n_embd, bias=True)
 
+        # Hook points
+        self.resid_pre_x = HookPoint()
+        self.resid_pre_y = HookPoint()
+        self.resid_post_x = HookPoint()
+        self.resid_post_y = HookPoint()
+
+        self.setup()
+
     def forward(self, x, y):
         # x: the residual stream that can be read from 
         # y: the output-only residual stream where we'll apply losses
+
+        x = self.resid_pre_x(x)
+        y = self.resid_pre_y(y)
+
         attn_output = self.attn(self.ln_1(x))
         x = x + attn_output
         y = y + self.attn_output_head(attn_output)
@@ -114,6 +127,10 @@ class Block(nn.Module):
         mlp_output = self.mlp(self.ln_2(x))
         x = x + mlp_output
         y = y + self.mlp_output_head(mlp_output)
+
+        x = self.resid_post_x(x)
+        y = self.resid_post_y(y)
+
         return x, y
 
 @dataclass
@@ -132,7 +149,7 @@ class GPTConfig:
             self.per_layer_weight = [0.0] * (self.n_layer) + [1.0]
         assert len(self.per_layer_weight) == self.n_layer + 1, f"Expected {self.n_layer+1} per-layer weights, got {len(self.per_layer_weight)}"
 
-class GPT(nn.Module):
+class GPT(HookedRootModule):
 
     def __init__(self, config: GPTConfig):
         super().__init__()
@@ -163,6 +180,9 @@ class GPT(nn.Module):
 
         # report number of parameters
         print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
+
+        # Set up Transformer-lens hook points
+        self.setup()
 
     def get_num_params(self, non_embedding=True):
         """
