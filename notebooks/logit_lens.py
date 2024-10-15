@@ -2,6 +2,8 @@ import pathlib
 import nnsight
 import pickle
 import torch
+import numpy as np
+import os
 
 from jaxtyping import Float
 from nnsight import NNsight
@@ -12,11 +14,16 @@ from nanogpt.utils.device import get_device
 
 this_dir = pathlib.Path(__file__).parent.absolute() # .../notebooks
 project_dir = this_dir.parent 
+data_dir = project_dir / 'data' / 'shakespeare_char'
 
 def load_metadata():
-    with open(project_dir / 'data' / 'shakespeare_char' / 'meta.pkl', 'rb') as f:
+    with open(data_dir / 'meta.pkl', 'rb') as f:
         meta = pickle.load(f)
     return meta
+
+def load_test_data():
+    data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
+    return torch.from_numpy(data).to(torch.int64)
 
 if __name__ == "__main__":
 
@@ -25,14 +32,19 @@ if __name__ == "__main__":
     # Load the tokenization info
     metadata = load_metadata()
     stoi = metadata['stoi']
+    itos = metadata['itos']
 
-    # Dummy input
-    text = 'T'
-    token = stoi[text]
-    token_th = torch.tensor(token).view(1, 1).to(device)
+    # Get some test data
+    test_data = load_test_data()
+    tokens = test_data[:256]
+    # print the test data
+    print("Test data:")
+    print("".join([itos[i.item()] for i in tokens]))
+    tokens = tokens.unsqueeze(0)
+    tokens = tokens.to(device)
 
     # Load the model
-    checkpoint = 'gelu-2l-001'
+    checkpoint = 'gelu-2l-111'
     model = load_checkpoint(project_dir / 'checkpoints' / checkpoint)
     print(checkpoint)
 
@@ -62,7 +74,7 @@ if __name__ == "__main__":
 
         return torch.stack(all_layer_logits, dim=1)
     
-    layerwise_logits = get_layerwise_logits(model, token_th)
+    layerwise_logits = get_layerwise_logits(model, tokens)
     # Convert to log probs
     layerwise_logprobs = torch.log_softmax(layerwise_logits, dim=-1)
 
@@ -72,7 +84,7 @@ if __name__ == "__main__":
     kl_divs = []
     for i in range(layerwise_logprobs.shape[1]):
         curr_layer_logprobs = layerwise_logprobs[:, i]
-        kl_div = torch.nn.functional.kl_div(curr_layer_logprobs, final_layer_logprobs, reduction='batchmean', log_target=True)
+        kl_div = torch.nn.functional.kl_div(curr_layer_logprobs, final_layer_logprobs, reduction='mean', log_target=True)
         print(f"KL divergence between layer {i} and final layer: {kl_div.item()}")
         kl_divs.append(kl_div.item())
     kl_divs = torch.tensor(kl_divs)
