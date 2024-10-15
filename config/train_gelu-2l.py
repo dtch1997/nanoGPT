@@ -22,8 +22,8 @@ dropout = 0.2
 per_layer_weight = [0, 0, 1]
 
 # Training stuff
-max_iters = 600_000 # TODO: figure out how many iterations to run
-lr_decay_iters = 600_000
+max_iters = 20_000 # TODO: figure out how many iterations to run
+lr_decay_iters = 20_000
 weight_decay = 1e-1
 always_save_checkpoint = False # we expect to overfit on this small dataset, so only save when val improves
 
