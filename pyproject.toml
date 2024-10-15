@@ -14,6 +14,7 @@ dependencies = [
     "ipykernel>=6.29.5",
     "pip>=24.2",
     "pyspark>=3.5.3",
+    "transformer-lens>=2.7.0",
 ]
 requires-python = ">=3.10"
 readme = "README.md"
