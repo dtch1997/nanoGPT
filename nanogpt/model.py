@@ -149,6 +149,11 @@ class GPTConfig:
             self.per_layer_weight = [0.0] * (self.n_layer) + [1.0]
         assert len(self.per_layer_weight) == self.n_layer + 1, f"Expected {self.n_layer+1} per-layer weights, got {len(self.per_layer_weight)}"
 
+        # normalize the per-layer weight
+        total = sum(self.per_layer_weight)
+        self.per_layer_weight = [w / total for w in self.per_layer_weight]
+        assert math.isclose(sum(self.per_layer_weight), 1.0, abs_tol=1e-5), f"per-layer weights do not sum to 1.0: {sum(self.per_layer_weight)}"
+
 class GPT(HookedRootModule):
 
     def __init__(self, config: GPTConfig):
