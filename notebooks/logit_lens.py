@@ -32,7 +32,9 @@ if __name__ == "__main__":
     token_th = torch.tensor(token).view(1, 1).to(device)
 
     # Load the model
-    model = load_checkpoint(project_dir / 'checkpoints' / 'gelu-2l-001')
+    checkpoint = 'gelu-2l-001'
+    model = load_checkpoint(project_dir / 'checkpoints' / checkpoint)
+    print(checkpoint)
 
     def get_logits(resid_pre_write: Float[torch.Tensor, "batch seq d_vocab"]) -> Float[torch.Tensor, "batch seq d_vocab"]:
         """ Get the logits from the model """
@@ -67,7 +69,15 @@ if __name__ == "__main__":
     # calculate KL divergence
     final_layer_logprobs = layerwise_logprobs[:, -1]
 
+    kl_divs = []
     for i in range(layerwise_logprobs.shape[1]):
         curr_layer_logprobs = layerwise_logprobs[:, i]
         kl_div = torch.nn.functional.kl_div(curr_layer_logprobs, final_layer_logprobs, reduction='batchmean', log_target=True)
         print(f"KL divergence between layer {i} and final layer: {kl_div.item()}")
+        kl_divs.append(kl_div.item())
+    kl_divs = torch.tensor(kl_divs)
+
+    # Save the KL divergences
+    save_dir = pathlib.Path('kl_div')
+    save_dir.mkdir(exist_ok=True)
+    torch.save(kl_divs, save_dir / f'{checkpoint}.pt')

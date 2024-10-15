@@ -15,6 +15,8 @@ dependencies = [
     "pip>=24.2",
     "pyspark>=3.5.3",
     "transformer-lens>=2.7.0",
+    "seaborn>=0.13.2",
+    "matplotlib>=3.9.2",
 ]
 requires-python = ">=3.10"
 readme = "README.md"
