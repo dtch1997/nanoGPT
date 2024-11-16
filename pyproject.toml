@@ -17,6 +17,7 @@ dependencies = [
     "transformer-lens>=2.7.0",
     "seaborn>=0.13.2",
     "matplotlib>=3.9.2",
+    "simple-parsing>=0.1.6",
 ]
 requires-python = ">=3.10"
 readme = "README.md"

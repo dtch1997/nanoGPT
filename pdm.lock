@@ -5,7 +5,7 @@
 groups = ["default"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:58bfef9159ff5c4f2ec65caadfd44d314d5d8b627c6667f51021dec682e80af5"
+content_hash = "sha256:0fd154b80e08b4b44608bb15f2a00028ef728a08bd86595af4aa896d9f53ca97"
 
 [[metadata.targets]]
 requires_python = ">=3.10"
@@ -536,6 +536,17 @@ dependencies = [
 files = [
     {file = "docker-pycreds-0.4.0.tar.gz", hash = "sha256:6ce3270bcaf404cc4c3e27e4b6c70d3521deae82fb508767870fdbf772d584d4"},
     {file = "docker_pycreds-0.4.0-py2.py3-none-any.whl", hash = "sha256:7266112468627868005106ec19cd0d722702d2b7d5912a28e19b826c3d37af49"},
+]
+
+[[package]]
+name = "docstring-parser"
+version = "0.16"
+requires_python = ">=3.6,<4.0"
+summary = "Parse Python docstrings in reST, Google and Numpydoc format"
+groups = ["default"]
+files = [
+    {file = "docstring_parser-0.16-py3-none-any.whl", hash = "sha256:bf0a1387354d3691d102edef7ec124f219ef639982d096e26e3b60aeffa90637"},
+    {file = "docstring_parser-0.16.tar.gz", hash = "sha256:538beabd0af1e2db0146b6bd3caa526c35a34d61af9fd2887f3a8a27a739aa6e"},
 ]
 
 [[package]]
@@ -2272,6 +2283,21 @@ groups = ["default"]
 files = [
     {file = "setuptools-75.1.0-py3-none-any.whl", hash = "sha256:35ab7fd3bcd95e6b7fd704e4a1539513edad446c097797f2985e0e4b960772f2"},
     {file = "setuptools-75.1.0.tar.gz", hash = "sha256:d59a21b17a275fb872a9c3dae73963160ae079f1049ed956880cd7c09b120538"},
+]
+
+[[package]]
+name = "simple-parsing"
+version = "0.1.6"
+requires_python = "<4.0,>=3.8"
+summary = "A small utility for simplifying and cleaning up argument parsing scripts."
+groups = ["default"]
+dependencies = [
+    "docstring-parser<1.0,>=0.15",
+    "typing-extensions>=4.5.0",
+]
+files = [
+    {file = "simple_parsing-0.1.6-py3-none-any.whl", hash = "sha256:2a6e74b061fb754cc441559e8dcea9d108286d9e0ffaa9cca4eea6bbe85372e1"},
+    {file = "simple_parsing-0.1.6.tar.gz", hash = "sha256:dad192e9633515a5627e343106636590a39a5ce85f6c47ced43507044ed98956"},
 ]
 
 [[package]]

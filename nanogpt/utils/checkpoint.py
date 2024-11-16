@@ -16,7 +16,7 @@ def load_checkpoint(checkpoint_dir: str | pathlib.Path) -> GPT:
     checkpoint_path = checkpoint_dir / 'ckpt.pt'
 
     # Load the model from the checkpoint
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
     gptconf = GPTConfig(**checkpoint['model_args'])
     model = GPT(gptconf)
     model = model.to(device)
